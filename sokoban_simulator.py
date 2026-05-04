@@ -189,20 +189,43 @@ def parse_map(text: str) -> SokobanMap:
 
 def is_solved(state: State, game_map: SokobanMap) -> bool:
     for box in state.boxes:
-        if box.label:
-            if game_map.labeled_targets.get(box.label) != box.pos:
-                return False
-        elif box.pos not in game_map.targets:
+        if not is_box_on_its_target(box, game_map):
             return False
     return True
+
+
+def is_box_on_its_target(box: Box, game_map: SokobanMap) -> bool:
+    if box.label:
+        return game_map.labeled_targets.get(box.label) == box.pos
+    return box.pos in game_map.targets
 
 
 def in_bounds(pos: Pos, game_map: SokobanMap) -> bool:
     return 0 <= pos.row < game_map.height and 0 <= pos.col < game_map.width
 
 
+def is_blocked_cell(pos: Pos, game_map: SokobanMap) -> bool:
+    return not in_bounds(pos, game_map) or pos in game_map.walls
+
+
 def is_free(pos: Pos, state: State, game_map: SokobanMap) -> bool:
     return in_bounds(pos, game_map) and pos not in game_map.walls and box_at(pos, state) is None
+
+
+def is_deadlocked(state: State, game_map: SokobanMap) -> bool:
+    for box in state.boxes:
+        if is_box_on_its_target(box, game_map):
+            continue
+
+        up = is_blocked_cell(box.pos.step("U"), game_map)
+        down = is_blocked_cell(box.pos.step("D"), game_map)
+        left = is_blocked_cell(box.pos.step("L"), game_map)
+        right = is_blocked_cell(box.pos.step("R"), game_map)
+
+        if (up or down) and (left or right):
+            return True
+
+    return False
 
 
 def box_at(pos: Pos, state: State) -> Box | None:
@@ -248,6 +271,8 @@ def solve(game_map: SokobanMap, max_states: int = 100_000) -> list[Step] | None:
 
         for action, next_state in neighbors(state, game_map):
             if next_state in visited:
+                continue
+            if is_deadlocked(next_state, game_map):
                 continue
             visited.add(next_state)
             kind, direction = action.split()
