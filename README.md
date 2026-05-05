@@ -61,12 +61,33 @@ push_box('R', 2)
 python .\run_map_tests.py
 ```
 
+使用 A* 搜索：
+
+```powershell
+python .\run_map_tests.py --algorithm astar
+```
+
+单张地图也可以选择算法：
+
+```powershell
+python .\sokoban_simulator.py .\maps\11_two_labeled_swap.txt --algorithm astar
+```
+
+导出车端可读的 JSON 动作：
+
+```powershell
+python .\sokoban_simulator.py .\maps\11_two_labeled_swap.txt --algorithm astar --json
+```
+
 每张地图会输出：
 
 ```text
 是否有解
 BFS 栅格步数
 编译后 move_to / align_to_box / push_box 数量
+replay 是否通过
 ```
 
 带标签箱子必须推到对应大写目标。例如 `a` 只能推到 `A`，`b` 只能推到 `B`。这用于模拟真实比赛中“箱子分类后推到对应目标点”的情况。
+
+`replay=PASS` 表示编译后的实车动作重新回放后，最终地图仍然满足完成条件。它用于防止 `compile_plan()` 把 BFS/A* 路径压缩错。

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import heapq
+import json
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
@@ -99,6 +101,10 @@ class SokobanMap:
 
 
 class MapError(ValueError):
+    pass
+
+
+class ReplayError(ValueError):
     pass
 
 
@@ -256,7 +262,15 @@ def neighbors(state: State, game_map: SokobanMap) -> Iterable[tuple[str, State]]
         yield f"push {direction}", State(car=next_car, boxes=frozenset(new_boxes))
 
 
-def solve(game_map: SokobanMap, max_states: int = 100_000) -> list[Step] | None:
+def solve(game_map: SokobanMap, max_states: int = 100_000, algorithm: str = "bfs") -> list[Step] | None:
+    if algorithm == "bfs":
+        return solve_bfs(game_map, max_states=max_states)
+    if algorithm == "astar":
+        return solve_astar(game_map, max_states=max_states)
+    raise ValueError(f"Unknown algorithm: {algorithm}")
+
+
+def solve_bfs(game_map: SokobanMap, max_states: int = 100_000) -> list[Step] | None:
     queue: deque[State] = deque([game_map.start])
     visited: set[State] = {game_map.start}
     parent: dict[State, tuple[State, Step]] = {}
@@ -283,6 +297,61 @@ def solve(game_map: SokobanMap, max_states: int = 100_000) -> list[Step] | None:
             queue.append(next_state)
 
     return None
+
+
+def solve_astar(game_map: SokobanMap, max_states: int = 100_000) -> list[Step] | None:
+    counter = 0
+    start = game_map.start
+    open_heap: list[tuple[int, int, int, State]] = [(heuristic(start, game_map), 0, counter, start)]
+    best_cost: dict[State, int] = {start: 0}
+    parent: dict[State, tuple[State, Step]] = {}
+
+    while open_heap:
+        _, cost, _, state = heapq.heappop(open_heap)
+        if cost != best_cost[state]:
+            continue
+        if is_solved(state, game_map):
+            return reconstruct_path(state, parent)
+
+        if len(best_cost) > max_states:
+            raise RuntimeError(f"Search stopped after {max_states} states.")
+
+        for action, next_state in neighbors(state, game_map):
+            if is_deadlocked(next_state, game_map):
+                continue
+
+            next_cost = cost + 1
+            if next_cost >= best_cost.get(next_state, 1_000_000_000):
+                continue
+
+            kind, direction = action.split()
+            parent[next_state] = (
+                state,
+                Step(kind=kind, direction=direction, before=state, after=next_state),
+            )
+            best_cost[next_state] = next_cost
+            counter += 1
+            priority = next_cost + heuristic(next_state, game_map)
+            heapq.heappush(open_heap, (priority, next_cost, counter, next_state))
+
+    return None
+
+
+def heuristic(state: State, game_map: SokobanMap) -> int:
+    total = 0
+    for box in state.boxes:
+        if is_box_on_its_target(box, game_map):
+            continue
+        if box.label:
+            target = game_map.labeled_targets[box.label]
+            total += manhattan(box.pos, target)
+        else:
+            total += min(manhattan(box.pos, target) for target in game_map.targets)
+    return total
+
+
+def manhattan(a: Pos, b: Pos) -> int:
+    return abs(a.row - b.row) + abs(a.col - b.col)
 
 
 def reconstruct_path(state: State, parent: dict[State, tuple[State, Step]]) -> list[Step]:
@@ -343,6 +412,144 @@ def compile_plan(steps: list[Step]) -> list[CarCommand]:
 
     flush_move_segment(commands, move_segment_start, move_segment_end)
     return commands
+
+
+def replay_commands(game_map: SokobanMap, commands: list[CarCommand]) -> State:
+    state = game_map.start
+    aligned_box: Pos | None = None
+    aligned_direction: str | None = None
+
+    for command in commands:
+        if command.name == "move_to":
+            (target,) = command.args
+            if not isinstance(target, Pos):
+                raise ReplayError("move_to expects a Pos target.")
+            state = replay_move_to(state, target, game_map)
+            aligned_box = None
+            aligned_direction = None
+        elif command.name == "align_to_box":
+            box_pos, direction = command.args
+            if not isinstance(box_pos, Pos) or not isinstance(direction, str):
+                raise ReplayError("align_to_box expects a Pos and direction.")
+            validate_alignment(state, box_pos, direction)
+            aligned_box = box_pos
+            aligned_direction = direction
+        elif command.name == "push_box":
+            direction, cells = command.args
+            if not isinstance(direction, str) or not isinstance(cells, int):
+                raise ReplayError("push_box expects a direction and cell count.")
+            if aligned_direction != direction or aligned_box is None:
+                raise ReplayError("push_box must follow a matching align_to_box command.")
+            state = replay_push_box(state, aligned_box, direction, cells, game_map)
+            aligned_box = None
+            aligned_direction = None
+        else:
+            raise ReplayError(f"Unknown command: {command.name}")
+
+    return state
+
+
+def replay_move_to(state: State, target: Pos, game_map: SokobanMap) -> State:
+    if target == state.car:
+        return state
+    if target.row != state.car.row and target.col != state.car.col:
+        raise ReplayError("move_to currently supports one straight grid segment.")
+
+    direction = direction_between(state.car, target)
+    car = state.car
+    while car != target:
+        car = car.step(direction)
+        if not is_free(car, state, game_map):
+            raise ReplayError(f"move_to path blocked at row={car.row}, col={car.col}.")
+
+    return State(car=target, boxes=state.boxes)
+
+
+def replay_push_box(state: State, box_pos: Pos, direction: str, cells: int, game_map: SokobanMap) -> State:
+    if cells <= 0:
+        raise ReplayError("push_box cell count must be positive.")
+    validate_alignment(state, box_pos, direction)
+
+    current_box = box_at(box_pos, state)
+    if current_box is None:
+        raise ReplayError("push_box target box is missing.")
+
+    car = state.car
+    boxes = set(state.boxes)
+    boxes.remove(current_box)
+    box = current_box
+
+    for _ in range(cells):
+        next_box_pos = box.pos.step(direction)
+        interim_state = State(car=car, boxes=frozenset(boxes))
+        if not is_free(next_box_pos, interim_state, game_map):
+            raise ReplayError(f"push_box blocked at row={next_box_pos.row}, col={next_box_pos.col}.")
+        car = box.pos
+        box = Box(box.label, next_box_pos)
+
+    boxes.add(box)
+    return State(car=car, boxes=frozenset(boxes))
+
+
+def validate_alignment(state: State, box_pos: Pos, direction: str) -> None:
+    if direction not in DIRECTIONS:
+        raise ReplayError(f"Invalid direction: {direction}")
+    if box_at(box_pos, state) is None:
+        raise ReplayError(f"No box at row={box_pos.row}, col={box_pos.col}.")
+    expected_car = opposite_pos(box_pos, direction)
+    if state.car != expected_car:
+        raise ReplayError(
+            "Car is not aligned behind box: "
+            f"car=({state.car.row},{state.car.col}), "
+            f"expected=({expected_car.row},{expected_car.col})."
+        )
+
+
+def opposite_pos(pos: Pos, direction: str) -> Pos:
+    dr, dc = DIRECTIONS[direction]
+    return Pos(pos.row - dr, pos.col - dc)
+
+
+def direction_between(start: Pos, end: Pos) -> str:
+    if start.row == end.row:
+        if end.col > start.col:
+            return "R"
+        if end.col < start.col:
+            return "L"
+    if start.col == end.col:
+        if end.row > start.row:
+            return "D"
+        if end.row < start.row:
+            return "U"
+    raise ReplayError("Positions are not aligned on one grid axis.")
+
+
+def command_to_dict(command: CarCommand) -> dict[str, object]:
+    payload: dict[str, object] = {"command": command.name}
+    if command.name == "move_to":
+        (target,) = command.args
+        payload["target"] = pos_to_dict(target)
+    elif command.name == "align_to_box":
+        box_pos, direction = command.args
+        payload["box"] = pos_to_dict(box_pos)
+        payload["direction"] = direction
+    elif command.name == "push_box":
+        direction, cells = command.args
+        payload["direction"] = direction
+        payload["cells"] = cells
+    else:
+        payload["args"] = list(command.args)
+    return payload
+
+
+def commands_to_json(commands: list[CarCommand]) -> str:
+    return json.dumps([command_to_dict(command) for command in commands], indent=2)
+
+
+def pos_to_dict(pos: object) -> dict[str, int]:
+    if not isinstance(pos, Pos):
+        raise TypeError("Expected Pos.")
+    return {"row": pos.row, "col": pos.col}
 
 
 def flush_move_segment(commands: list[CarCommand], start: Pos | None, end: Pos | None) -> None:
@@ -415,34 +622,45 @@ def main() -> int:
     )
     parser.add_argument("map_file", nargs="?", help="Optional UTF-8 text file containing a 16x12 map.")
     parser.add_argument("--max-states", type=int, default=100_000, help="Search limit. Default: 100000.")
+    parser.add_argument("--algorithm", choices=["bfs", "astar"], default="bfs", help="Solver algorithm.")
+    parser.add_argument("--json", action="store_true", help="Print compiled car commands as JSON.")
     args = parser.parse_args()
 
     try:
         game_map = parse_map(load_map(args.map_file))
-        plan = solve(game_map, max_states=args.max_states)
-    except (MapError, RuntimeError) as exc:
+        plan = solve(game_map, max_states=args.max_states, algorithm=args.algorithm)
+    except (MapError, RuntimeError, ValueError, ReplayError) as exc:
         print(f"error: {exc}")
         return 1
-
-    print("Initial map:")
-    print(render(game_map))
-    print()
 
     if plan is None:
         print("No solution found.")
         return 2
 
-    print(f"Grid solution found: {len(plan)} steps")
+    commands = compile_plan(plan)
+    replay_state = replay_commands(game_map, commands)
+    replay_ok = is_solved(replay_state, game_map)
+
+    if args.json:
+        print(commands_to_json(commands))
+        return 0 if replay_ok else 3
+
+    print("Initial map:")
+    print(render(game_map))
+    print()
+
+    print(f"Grid solution found by {args.algorithm}: {len(plan)} steps")
     for index, step in enumerate(plan, start=1):
         print(f"{index:03d}: {step.kind} {step.direction}")
 
-    commands = compile_plan(plan)
     print()
     print(f"Compiled car commands: {len(commands)} commands")
     for index, command in enumerate(commands, start=1):
         print(f"{index:03d}: {command.format()}")
+    print()
+    print(f"Replay validation: {'PASS' if replay_ok else 'FAIL'}")
 
-    return 0
+    return 0 if replay_ok else 3
 
 
 if __name__ == "__main__":
