@@ -79,6 +79,15 @@ python .\sokoban_simulator.py .\maps\11_two_labeled_swap.txt --algorithm astar
 python .\sokoban_simulator.py .\maps\11_two_labeled_swap.txt --algorithm astar --json
 ```
 
+导出后交给命令消费者执行占位流程：
+
+```powershell
+python .\sokoban_simulator.py .\maps\11_two_labeled_swap.txt --algorithm astar --json > plan.json
+python .\command_consumer.py .\plan.json
+```
+
+`command_consumer.py` 现在只校验并打印命令，后续把里面的 `execute_move_to()`、`execute_align_to_box()`、`execute_push_box()` 替换成真实底盘控制。
+
 每张地图会输出：
 
 ```text
