@@ -1,0 +1,7 @@
+{
+  "command": "move_to",
+  "target": {
+    "row": 2,
+    "col": 5
+  }
+}

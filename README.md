@@ -1,102 +1,36 @@
-# 智能车人工智能视觉组备赛
+# SmartCar Workspace
 
-当前仓库先用于你负责的算法主线：状态机、文本地图模拟、推箱子规划和后续底盘控制接口。
-
-## 文本地图模拟器
-
-运行内置样例：
-
-```powershell
-python .\sokoban_simulator.py
-```
-
-运行指定地图：
-
-```powershell
-python .\sokoban_simulator.py .\sample_map.txt
-```
-
-地图固定为 16 列 x 12 行。符号含义：
-
-| 符号 | 含义 |
-|---|---|
-| `#` | 墙 |
-| `-` | 空地 |
-| `@` | 车 |
-| `$` | 无标签箱子 |
-| `.` | 无标签目标点 |
-| `a-z` | 带标签箱子 |
-| `A-Z` | 对应标签目标点 |
-| `*` | 无标签箱子在目标点 |
-| `+` | 车在目标点 |
-
-第一版模拟器只解决纯推箱子路径规划，不做 GUI、摄像头、物理仿真或赛事上位机替代。
-
-## 输出说明
-
-程序会输出两层动作。
-
-第一层是 BFS 的栅格动作：
+这个仓库现在按职责拆成两块，根目录只保留入口说明和少量工程配置。
 
 ```text
-move R
-push R
+smcar/
+  software/vision/       视觉识别：OpenMV/OpenART、模型、数据集工具、ROI 配置
+  hardware/control/      小车路径控制：推箱子规划、命令消费者、串口协议、RT1064 参考代码
+  local_assets/          本地资料：安装包、下载包、报告、旧模型备份，不进 git
 ```
 
-第二层是面向实车控制的编译动作：
+## 常用入口
 
-```text
-move_to(row=3, col=6)
-align_to_box(row=3, col=7, 'R')
-push_box('R', 2)
-```
-
-后续接底盘时，优先对接第二层动作。
-
-## 地图测试集
-
-自动跑 `maps/` 下所有地图：
+路径规划和底盘命令测试：
 
 ```powershell
-python .\run_map_tests.py
-```
-
-使用 A* 搜索：
-
-```powershell
-python .\run_map_tests.py --algorithm astar
-```
-
-单张地图也可以选择算法：
-
-```powershell
-python .\sokoban_simulator.py .\maps\11_two_labeled_swap.txt --algorithm astar
-```
-
-导出车端可读的 JSON 动作：
-
-```powershell
+cd .\hardware\control
+python .\run_all_tests.py --skip-astar
 python .\sokoban_simulator.py .\maps\11_two_labeled_swap.txt --algorithm astar --json
+python .\command_consumer.py .\plan.json --serial-port COM3 --baudrate 115200
 ```
 
-导出后交给命令消费者执行占位流程：
+视觉识别和数据集工具：
 
 ```powershell
-python .\sokoban_simulator.py .\maps\11_two_labeled_swap.txt --algorithm astar --json > plan.json
-python .\command_consumer.py .\plan.json
+cd .\software\vision
+python .\tools\prepare_openart_dataset.py preview-character
+python .\scripts\dataset_tools\preview_roi.py
 ```
 
-`command_consumer.py` 现在只校验并打印命令，后续把里面的 `execute_move_to()`、`execute_align_to_box()`、`execute_push_box()` 替换成真实底盘控制。
+## 管理规则
 
-每张地图会输出：
-
-```text
-是否有解
-BFS 栅格步数
-编译后 move_to / align_to_box / push_box 数量
-replay 是否通过
-```
-
-带标签箱子必须推到对应大写目标。例如 `a` 只能推到 `A`，`b` 只能推到 `B`。这用于模拟真实比赛中“箱子分类后推到对应目标点”的情况。
-
-`replay=PASS` 表示编译后的实车动作重新回放后，最终地图仍然满足完成条件。它用于防止 `compile_plan()` 把 BFS/A* 路径压缩错。
+- 源码、配置、说明文档放在 `software/vision` 或 `hardware/control` 对应模块内。
+- 训练截图、生成报告、安装包、临时备份放进 `local_assets` 或被 `.gitignore` 忽略的目录。
+- `.venv_tflite` 是本地虚拟环境，保留在本机但不提交。
+- 新增地图夹具放到 `hardware/control/maps`，新增视觉采集原图放到 `software/vision/openmv/openmvImages`。

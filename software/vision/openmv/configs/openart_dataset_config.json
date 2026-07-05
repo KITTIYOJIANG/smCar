@@ -1,0 +1,16 @@
+{
+  "raw_root": "openmv/openmvImages/raw_Images/right_eye/character",
+  "preview_dir": "openmv/openmvImages/dataset_previews",
+  "character": {
+    "roi": [180, 100, 270, 185],
+    "output_root": "openmv/openmvImages/datasets/character",
+    "output_size": 96
+  },
+  "grid": {
+    "quad": [[202, 0], [454, 0], [443, 110], [194, 105]],
+    "rows": 10,
+    "cols": 10,
+    "output_root": "openmv/openmvImages/datasets/grid_unlabeled",
+    "tile_size": 64
+  }
+}
