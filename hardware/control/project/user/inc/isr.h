@@ -1,35 +1,35 @@
 /*********************************************************************************************************************
-* RT1064DVL6A Opensourec Library ����RT1064DVL6A ��Դ�⣩��һ�����ڹٷ� SDK �ӿڵĵ�������Դ��
-* Copyright (c) 2022 SEEKFREE ��ɿƼ�
+* RT1064DVL6A Opensourec Library 即（RT1064DVL6A 开源库）是一个基于官方 SDK 接口的第三方开源库
+* Copyright (c) 2022 SEEKFREE 逐飞科技
 * 
-* ���ļ��� RT1064DVL6A ��Դ���һ����
+* 本文件是 RT1064DVL6A 开源库的一部分
 * 
-* RT1064DVL6A ��Դ�� ���������
-* �����Ը���������������ᷢ���� GPL��GNU General Public License���� GNUͨ�ù�������֤��������
-* �� GPL �ĵ�3�棨�� GPL3.0������ѡ��ģ��κκ����İ汾�����·�����/���޸���
+* RT1064DVL6A 开源库 是免费软件
+* 您可以根据自由软件基金会发布的 GPL（GNU General Public License，即 GNU通用公共许可证）的条款
+* 即 GPL 的第3版（即 GPL3.0）或（您选择的）任何后来的版本，重新发布和/或修改它
 * 
-* ����Դ��ķ�����ϣ�����ܷ������ã�����δ�������κεı�֤
-* ����û�������������Ի��ʺ��ض���;�ı�֤
-* ����ϸ����μ� GPL
+* 本开源库的发布是希望它能发挥作用，但并未对其作任何的保证
+* 甚至没有隐含的适销性或适合特定用途的保证
+* 更多细节请参见 GPL
 * 
-* ��Ӧ�����յ�����Դ���ͬʱ�յ�һ�� GPL �ĸ���
-* ���û�У������<https://www.gnu.org/licenses/>
+* 您应该在收到本开源库的同时收到一份 GPL 的副本
+* 如果没有，请参阅<https://www.gnu.org/licenses/>
 * 
-* ����ע����
-* ����Դ��ʹ�� GPL3.0 ��Դ����֤Э�� ������������Ϊ���İ汾
-* ��������Ӣ�İ��� libraries/doc �ļ����µ� GPL3_permission_statement.txt �ļ���
-* ����֤������ libraries �ļ����� �����ļ����µ� LICENSE �ļ�
-* ��ӭ��λʹ�ò����������� ���޸�����ʱ���뱣����ɿƼ��İ�Ȩ����������������
+* 额外注明：
+* 本开源库使用 GPL3.0 开源许可证协议 以上许可申明为译文版本
+* 许可申明英文版在 libraries/doc 文件夹下的 GPL3_permission_statement.txt 文件中
+* 许可证副本在 libraries 文件夹下 即该文件夹下的 LICENSE 文件
+* 欢迎各位使用并传播本程序 但修改内容时必须保留逐飞科技的版权声明（即本声明）
 * 
-* �ļ�����          isr
-* ��˾����          �ɶ���ɿƼ����޹�˾
-* �汾��Ϣ          �鿴 libraries/doc �ļ����� version �ļ� �汾˵��
-* ��������          IAR 8.32.4 or MDK 5.33
-* ����ƽ̨          RT1064DVL6A
-* ��������          https://seekfree.taobao.com/
+* 文件名称          isr
+* 公司名称          成都逐飞科技有限公司
+* 版本信息          查看 libraries/doc 文件夹内 version 文件 版本说明
+* 开发环境          IAR 8.32.4 or MDK 5.33
+* 适用平台          RT1064DVL6A
+* 店铺链接          https://seekfree.taobao.com/
 * 
-* �޸ļ�¼
-* ����              ����                ��ע
+* 修改记录
+* 日期              作者                备注
 * 2022-09-21        SeekFree            first version
 ********************************************************************************************************************/
  
@@ -38,7 +38,41 @@
 #ifndef _isr_h
 #define _isr_h
 
+#include "stdint.h"
+#include "stdbool.h"
 
+#define OPENART_RX_MAX_DATA_LEN        (256)
+#define OPENART_MAP_ROWS               (12)
+#define OPENART_MAP_COLS               (16)
+#define OPENART_MAP_CELL_COUNT         (OPENART_MAP_ROWS * OPENART_MAP_COLS)
+#define OPENART_MAP_CMD                (0x02)
+#define OPENART_MAP_DATA_LEN           (OPENART_MAP_CELL_COUNT + 3)
 
+typedef enum
+{
+    OPENART_RX_WAIT_HEAD1 = 0,
+    OPENART_RX_WAIT_HEAD2,
+    OPENART_RX_WAIT_CMD,
+    OPENART_RX_WAIT_LEN,
+    OPENART_RX_WAIT_DATA,
+    OPENART_RX_WAIT_CHECK,
+    OPENART_RX_WAIT_TAIL,
+} openart_rx_state_enum;
+
+typedef struct
+{
+    uint8_t cmd;
+    uint8_t len;
+    uint8_t data[OPENART_RX_MAX_DATA_LEN];
+    uint16_t data_index;
+    uint8_t check_sum;
+    bool frame_ready;
+} openart_rx_packet_struct;
+
+extern volatile openart_rx_state_enum openart_rx_state;
+extern volatile openart_rx_packet_struct openart_rx_packet;
+
+void openart_uart_parse_byte(uint8_t rx_byte);
 
 #endif
+
