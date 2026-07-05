@@ -1,0 +1,22 @@
+[
+  {
+    "command": "move_to",
+    "target": {
+      "row": 2,
+      "col": 5
+    }
+  },
+  {
+    "command": "align_to_box",
+    "box": {
+      "row": 2,
+      "col": 6
+    },
+    "direction": "R"
+  },
+  {
+    "command": "push_box",
+    "direction": "R",
+    "cells": 2
+  }
+]

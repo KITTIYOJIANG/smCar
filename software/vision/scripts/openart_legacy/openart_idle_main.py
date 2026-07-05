@@ -1,0 +1,1 @@
+print("OPENART_IDLE_MAIN_READY")

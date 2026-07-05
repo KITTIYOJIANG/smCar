@@ -1,0 +1,68 @@
+{
+  "_notes": [
+    "Keep this file as the single source of truth for ROI cropping.",
+    "Coordinates are x, y, w, h after rotate_degrees_clockwise is applied.",
+    "The default values target the existing 640x480 raw OpenMV captures."
+  ],
+  "rotate_degrees_clockwise": 0,
+  "frame": {
+    "width": 640,
+    "height": 480
+  },
+  "model": {
+    "input_size": 128,
+    "color_order": "RGB",
+    "normalization": "ImageNet mean/std in train_classifier.py",
+    "tflite_input": "uint8"
+  },
+  "rois": {
+    "screen_roi": {
+      "x": 205,
+      "y": 5,
+      "w": 285,
+      "h": 225
+    },
+    "map_roi": {
+      "x": 212,
+      "y": 0,
+      "w": 230,
+      "h": 125
+    },
+    "first_view_roi": {
+      "x": 225,
+      "y": 128,
+      "w": 225,
+      "h": 180
+    },
+    "class_roi": {
+      "x": 233,
+      "y": 120,
+      "w": 191,
+      "h": 180
+    },
+    "digit_roi": {
+      "x": 225,
+      "y": 128,
+      "w": 225,
+      "h": 180
+    }
+  },
+  "datasets": {
+    "class": {
+      "source": "openmv/openmvImages/raw_Images/right_eye/character",
+      "output": "openmv/openmvImages/roi_class",
+      "roi": "class_roi",
+      "exclude_labels": [
+        "map_replay",
+        "num",
+        "tnt"
+      ]
+    },
+    "digit": {
+      "source": "openmv/openmvImages/raw_Images/right_eye/digit",
+      "output": "openmv/openmvImages/roi_digit",
+      "roi": "digit_roi",
+      "exclude_labels": []
+    }
+  }
+}

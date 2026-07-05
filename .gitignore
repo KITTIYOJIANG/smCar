@@ -1,3 +1,39 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+
+# Local Python environments
+.venv/
+.venv*/
+.venv_tflite/
+
+# Local-only bulky assets and generated reports
+local_assets/
+software/vision/openmv/openmvImages/
+software/vision/reports/
+software/vision/.ipynb_checkpoints/
+hardware/control/plan.json
+plan.json
+*.log
+
+# Scratch files generated during local debugging and document extraction
+tmp/
+
+# Packaged GUI releases are generated artifacts; keep source files instead
+hardware/control/project/tools/release/
+
+# Keil/MDK generated outputs and per-user UI state
+hardware/control/project/mdk/Objects/
+hardware/control/project/mdk/Listings/
+hardware/control/project/mdk/*.uvguix.*
+hardware/control/project/mdk/JLinkSettings.ini
+*.axf
+*.elf
+*.hex
+*.bin
+*.map
+*.lst
+*.o
+*.d
+*.crf
+*.lnp
