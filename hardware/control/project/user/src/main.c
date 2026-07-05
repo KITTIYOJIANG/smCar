@@ -48,7 +48,11 @@
 *   turn lvy 10     Set left/CCW turn vy compensation in mm/s.
 *   turn rvx -25    Set right/CW turn vx compensation in mm/s.
 *   turn rvy 0      Set right/CW turn vy compensation in mm/s.
+*   map status      Print OpenART UART1 map receiver status.
+*   map print       Print the latest 16x12 ASCII map received from OpenART.
+*   map stream 1/0  Enable/disable printing every valid received map frame.
 *   Body velocity units: vx right+, vy forward+, wz CCW+.
+*   OpenART map frame: 5A A5 cmd len data checksum ED; cmd=0x02, len=195.
 *
 * Encoder wheel mapping on this car:
 *   enc1 C0 / C1  : left rear  (LB)
@@ -68,6 +72,7 @@
 ********************************************************************************************************************/
 
 #include "zf_common_headfile.h"
+#include "isr.h"
 
 #define SAMPLE_PERIOD_MS              (100)
 #define MOTOR_PWM_FREQ_HZ             (17000)
@@ -135,6 +140,11 @@
 #define TURN_LEFT_COMP_VY_DEFAULT_MM_S  (10)
 #define TURN_RIGHT_COMP_VX_DEFAULT_MM_S (-25)  /* 2026-07-05 floor test: right 90 deg used stronger left compensation. */
 #define TURN_RIGHT_COMP_VY_DEFAULT_MM_S (0)
+
+#define OPENART_UART_INDEX              (UART_1)
+#define OPENART_UART_BAUD               (115200)
+#define OPENART_UART_TX_PIN             (UART1_TX_B12)
+#define OPENART_UART_RX_PIN             (UART1_RX_B13)
 
 #define MOTOR_1_DIR                   (C9 )
 #define MOTOR_1_PWM                   (PWM2_MODULE1_CHA_C8)
@@ -265,6 +275,14 @@ static int16 turn_right_comp_vy_mm_s = TURN_RIGHT_COMP_VY_DEFAULT_MM_S;
 static int32 turn_kp_x1000 = TURN_DEFAULT_KP_X1000;
 static int32 turn_stop_error_x1000 = TURN_DEFAULT_STOP_ERROR_X1000;
 static int32 turn_target_yaw_x1000 = 0;
+
+static uint8 openart_map[OPENART_MAP_ROWS][OPENART_MAP_COLS];
+static uint8 openart_map_valid = 0;
+static uint8 openart_map_stream_enabled = 0;
+static char openart_car_dir = '?';
+static uint8 openart_car_col = 0;
+static uint8 openart_car_row = 0;
+static uint32 openart_map_frame_count = 0;
 
 static void chassis_stop(void);
 static uint8 chassis_apply_velocity_targets(int16 vx_mm_s, int16 vy_mm_s, int16 wz_deg_s);
@@ -1208,6 +1226,7 @@ static void print_help(void)
     usb_cdc_write_string("FF cmd: ff 0/1, ffbase 3.500(set both), ffpos 3.500, ffneg 3.500, ffslope 0.016, boost 18.000, boostpos 18.000, boostneg 18.000\r\n");
     usb_cdc_write_string("IMU cmd: imu status, imu cal, imu stream 1/0, imu sign 1/-1, imu init, yaw, yaw reset\r\n");
     usb_cdc_write_string("Turn cmd: turn 90, turn -90, turn 180, turn left/right/back, turn stop/status, turn kp 1.500, turn max 150, turn min 120, turn tol 2.000, turn lvx/lvy/rvx/rvy\r\n");
+    usb_cdc_write_string("Map cmd: map status, map print, map stream 1/0. OpenART UART1 frame: 5A A5 cmd len data checksum ED.\r\n");
     usb_cdc_write_string("Feedback unit: wheel speed uses count/100ms; vel uses mm/s, mm/s, deg/s.\r\n");
     usb_cdc_write_string("Keep wheels off the ground while testing.\r\n");
     usb_cdc_write_string("========================================\r\n");
@@ -1711,6 +1730,156 @@ static void process_yaw_command(const char *arg)
     }
 }
 
+static void openart_uart_init(void)
+{
+    uart_init(OPENART_UART_INDEX, OPENART_UART_BAUD, OPENART_UART_TX_PIN, OPENART_UART_RX_PIN);
+    uart_rx_interrupt(OPENART_UART_INDEX, 1);
+}
+
+static char printable_map_cell(uint8 cell)
+{
+    if((cell < 32) || (cell > 126))
+    {
+        return '?';
+    }
+
+    return (char)cell;
+}
+
+static void print_openart_map_status(void)
+{
+    char text_buf[140];
+
+    snprintf(text_buf, sizeof(text_buf),
+             "OpenART map: valid=%u frames=%lu stream=%u uart=UART1 baud=%lu\r\n",
+             (unsigned int)openart_map_valid,
+             (unsigned long)openart_map_frame_count,
+             (unsigned int)openart_map_stream_enabled,
+             (unsigned long)OPENART_UART_BAUD);
+    usb_cdc_write_string(text_buf);
+
+    if(openart_map_valid)
+    {
+        snprintf(text_buf, sizeof(text_buf),
+                 "OpenART car: col=%u row=%u dir=%c\r\n",
+                 (unsigned int)openart_car_col,
+                 (unsigned int)openart_car_row,
+                 openart_car_dir);
+        usb_cdc_write_string(text_buf);
+    }
+}
+
+static void print_openart_map(void)
+{
+    char text_buf[140];
+    char line_buf[(OPENART_MAP_COLS * 2) + 3];
+    uint8 row;
+    uint8 col;
+    uint8 out_index;
+
+    if(!openart_map_valid)
+    {
+        usb_cdc_write_string("OpenART map: no valid frame received yet.\r\n");
+        return;
+    }
+
+    usb_cdc_write_string("\r\n====== OpenART ASCII map ======\r\n");
+    snprintf(text_buf, sizeof(text_buf),
+             "frame=%lu col=%u row=%u dir=%c\r\n",
+             (unsigned long)openart_map_frame_count,
+             (unsigned int)openart_car_col,
+             (unsigned int)openart_car_row,
+             openart_car_dir);
+    usb_cdc_write_string(text_buf);
+    usb_cdc_write_string("-------------------------------\r\n");
+
+    for(row = 0; row < OPENART_MAP_ROWS; row ++)
+    {
+        out_index = 0;
+        for(col = 0; col < OPENART_MAP_COLS; col ++)
+        {
+            line_buf[out_index ++] = printable_map_cell(openart_map[row][col]);
+            line_buf[out_index ++] = ' ';
+        }
+        line_buf[out_index ++] = '\r';
+        line_buf[out_index ++] = '\n';
+        line_buf[out_index] = '\0';
+        usb_cdc_write_string(line_buf);
+    }
+
+    usb_cdc_write_string("===============================\r\n");
+}
+
+static void openart_process_received_frame(void)
+{
+    uint16 src_index;
+    uint8 row;
+    uint8 col;
+
+    if(!openart_rx_packet.frame_ready)
+    {
+        return;
+    }
+
+    if((OPENART_MAP_CMD == openart_rx_packet.cmd) && (OPENART_MAP_DATA_LEN == openart_rx_packet.len))
+    {
+        src_index = 0;
+        for(row = 0; row < OPENART_MAP_ROWS; row ++)
+        {
+            for(col = 0; col < OPENART_MAP_COLS; col ++)
+            {
+                openart_map[row][col] = openart_rx_packet.data[src_index];
+                src_index ++;
+            }
+        }
+
+        openart_car_dir = (char)openart_rx_packet.data[OPENART_MAP_CELL_COUNT];
+        openart_car_col = openart_rx_packet.data[OPENART_MAP_CELL_COUNT + 1];
+        openart_car_row = openart_rx_packet.data[OPENART_MAP_CELL_COUNT + 2];
+        openart_map_valid = 1;
+        openart_map_frame_count ++;
+
+        if(openart_map_stream_enabled)
+        {
+            print_openart_map();
+        }
+    }
+
+    openart_rx_packet.frame_ready = false;
+}
+
+static void process_map_command(const char *arg)
+{
+    int16 value;
+
+    arg = skip_spaces(arg);
+
+    if(('\0' == *arg) || command_name_match(arg, "status"))
+    {
+        print_openart_map_status();
+    }
+    else if(command_name_match(arg, "print") || command_name_match(arg, "show"))
+    {
+        print_openart_map();
+    }
+    else if(command_name_match(arg, "stream"))
+    {
+        if(0 == parse_int16_value(command_argument(arg), &value))
+        {
+            openart_map_stream_enabled = (0 == value) ? 0 : 1;
+            print_openart_map_status();
+        }
+        else
+        {
+            usb_cdc_write_string("Bad map stream command. Example: map stream 1\r\n");
+        }
+    }
+    else
+    {
+        usb_cdc_write_string("Bad map command. Use: map status, map print, map stream 1/0\r\n");
+    }
+}
+
 static void active_wheel_select(wheel_index_enum wheel)
 {
     chassis_stop();
@@ -1849,6 +2018,10 @@ static void process_line_command(const char *line)
     else if(command_name_match(line, "turn"))
     {
         process_turn_command(command_argument(line));
+    }
+    else if(command_name_match(line, "map") || command_name_match(line, "openart"))
+    {
+        process_map_command(command_argument(line));
     }
     else if(command_name_match(line, "target"))
     {
@@ -2146,8 +2319,8 @@ int main(void)
     uint8 i;
 
     clock_init(SYSTEM_CLOCK_600M);
-    debug_init();
     usb_cdc_init();
+    openart_uart_init();
 
     system_delay_ms(800);
 
@@ -2204,6 +2377,7 @@ int main(void)
             process_line_command(line_local);
         }
 
+        openart_process_received_frame();
         imu_update();
         turn_control_update();
 

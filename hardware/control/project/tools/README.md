@@ -64,3 +64,14 @@ turn min = 120
 left  turn: lvx = -10, lvy = 10
 right turn: rvx = -25, rvy = 0
 ```
+
+## OpenART Map Frame Helper
+
+Use `openart_map_frame.py` to build a test UART frame for the OpenART global map protocol:
+
+```powershell
+python .\openart_map_frame.py --hex
+python .\openart_map_frame.py --port COM5 --dir U --col 5 --row 4
+```
+
+This helper is meant for a USB-TTL adapter connected to the RT1064 UART1 pins, not the USB CDC control port. On the USB CDC control port, use `map status`, `map print`, and `map stream 1/0`.
